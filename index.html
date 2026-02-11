@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Vedros: Heroic Command</title>
+    <style>
+        :root { 
+            --grass: #4ade80; --water: #38bdf8; --forest: #166534; 
+            --elevation: #a16207; --sm: #2563eb; --ork: #ef4444; --blood: #991b1b; 
+            --tile-size: 50px;
+        }
+        
+        * { box-sizing: border-box; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #111; color: #eee; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        
+        #main-container { display: flex; width: 100vw; height: 100vh; padding-top: 60px; }
+        #ui-layer { position: absolute; top: 0; width: 100%; height: 60px; padding: 0 20px; display: flex; justify-content: space-between; align-items: center; z-index: 100; background: #222; border-bottom: 2px solid #444; }
+        
+        #side-panel { width: 300px; background: #1a1a1a; border-left: 2px solid #444; display: flex; flex-direction: column; height: 100%; }
+        #log { flex-grow: 1; padding: 15px; font-family: monospace; font-size: 13px; overflow-y: auto; color: #00ff00; line-height: 1.4; border-bottom: 2px solid #444; }
+        .log-entry { margin-bottom: 8px; border-bottom: 1px solid #222; padding-bottom: 4px; font-size: 12px; }
+
+        /* Unit Inspector Styling */
+        #inspector { height: 200px; padding: 15px; background: #111; font-size: 0.9rem; }
+        .stat-line { display: flex; justify-content: space-between; margin-bottom: 5px; border-bottom: 1px hide solid #333; }
+        .bonus-tag { color: #ffd700; font-size: 0.8rem; display: block; margin-top: 2px; }
+
+        #game-viewport { flex-grow: 1; overflow: auto; display: flex; background: #000; padding: 40px; justify-content: center; align-items: flex-start; }
+
+        #phase-overlay { 
+            position: fixed; inset: 0; display: none; align-items: center; justify-content: center; 
+            background: rgba(0,0,0,0.7); z-index: 1000; pointer-events: none; 
+            font-size: 5rem; font-weight: 900; text-shadow: 0 0 20px rgba(0,0,0,1);
+            animation: overlay-pop 1.2s ease-in-out forwards;
+        }
+        @keyframes overlay-pop {
+            0% { opacity: 0; transform: scale(0.8); }
+            20% { opacity: 1; transform: scale(1); }
+            80% { opacity: 1; transform: scale(1); }
+            100% { opacity: 0; transform: scale(1.1); }
+        }
+
+        #setup-screen { position: absolute; inset: 0; background: #111; z-index: 200; display: flex; flex-direction: column; justify-content: center; align-items: center; overflow-y: auto; padding: 20px; }
+        .rules-card { background: #222; padding: 25px; border-radius: 10px; border: 1px solid #444; max-width: 800px; width: 95%; }
+        
+        .terrain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
+        .terrain-box { display: flex; align-items: center; gap: 10px; background: #333; padding: 10px; border-radius: 6px; font-size: 0.85rem; }
+        .swatch { width: 24px; height: 24px; border-radius: 4px; border: 1px solid #fff; }
+
+        #game-board { display: grid; position: relative; background: #222; border: 5px solid #444; line-height: 0; font-size: 0; }
+        .cell { width: var(--tile-size); height: var(--tile-size); border: 1px solid rgba(255,255,255,0.05); display: inline-block; vertical-align: top; }
+        .cell.grass { background: var(--grass); }
+        .cell.water { background: var(--water); cursor: not-allowed; }
+        .cell.forest { background: var(--forest); }
+        .cell.elevation { background: var(--elevation); }
+        .cell.blood-stain { background: var(--blood) !important; }
+        .cell.can-move { background: rgba(255, 255, 0, 0.4) !important; cursor: crosshair; outline: 2px inset yellow; z-index: 1; }
+        .cell.deploy-zone { outline: 2px dashed rgba(255,255,255,0.4); background: rgba(255,255,255,0.2); }
+
+        .unit { position: absolute; width: var(--tile-size); height: var(--tile-size); cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 10; transition: left 0.2s, top 0.2s; font-size: 14px; }
+        .unit-body { width: 40px; height: 40px; border-radius: 50%; border: 3px solid white; display: flex; align-items: center; justify-content: center; font-weight: 900; color: white; position: relative; }
+        .hero .unit-body { border: 4px solid #ffd700; width: 44px; height: 44px; box-shadow: 0 0 10px #ffd700; }
+        .sm .unit-body { background: var(--sm); }
+        .ork .unit-body { background: var(--ork); }
+        .unit.selected .unit-body { outline: 4px solid #ffff00; transform: scale(1.1); }
+        
+        .ap-pips { display: flex; gap: 4px; position: absolute; bottom: 2px; }
+        .pip { width: 8px; height: 8px; background: #ffff00; border-radius: 50%; border: 1px solid #000; }
+        .hp-label { font-size: 11px; font-weight: bold; position: absolute; top: -5px; background: #000; padding: 1px 5px; border-radius: 10px; border: 1px solid #fff; z-index: 11; line-height: 1; }
+        
+        .terrain-badge { position: absolute; top: 0; right: 0; background: #000; border: 1px solid #fff; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 10px; z-index: 12; }
+
+        #ability-btn { display: none; background: #9333ea; margin-right: 10px; }
+        #exit-btn { background: #b91c1c; margin-right: 10px; }
+        button { background: #3b82f6; color: #fff; border: none; padding: 12px 24px; font-weight: bold; cursor: pointer; border-radius: 4px; text-transform: uppercase; }
+        button:disabled { background: #444; cursor: not-allowed; }
+        input { background: #111; color: #fff; border: 1px solid #555; width: 50px; padding: 5px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+<div id="phase-overlay">PHASE START</div>
+
+<div id="setup-screen">
+    <h1 style="color:var(--grass); font-size: 3rem; margin-bottom: 10px;">VEDROS TACTICAL</h1>
+    <div class="rules-card">
+        <h3 style="margin:0; color: #ffd700;">BATTLEFIELD INTEL</h3>
+        
+        <div class="terrain-grid">
+            <div class="terrain-box"><div class="swatch" style="background:var(--water)"></div> <b>Water:</b> Impassable.</div>
+            <div class="terrain-box"><div class="swatch" style="background:var(--forest)"></div> <b>Forest (🌲):</b> Cover. Target +1 Difficulty.</div>
+            <div class="terrain-box"><div class="swatch" style="background:var(--elevation)"></div> <b>High Ground (▲):</b> +1 Attack. -1 Defense.</div>
+            <div class="terrain-box"><div class="swatch" style="border:2px dashed #fff; background:none"></div> <b>Mob Rule:</b> Orks get +1 to hit per adjacent ally.</div>
+        </div>
+
+        <p style="font-size: 0.9rem; border-top: 1px solid #444; padding-top: 10px;">
+            <b>SM Captain:</b> 5HP - <b>Repair</b> (Heal self/ally in 1 range).<br>
+            <b>Ork Warboss:</b> 4HP - <b>Waaagh!</b> (1 DMG to all adjacent enemies).
+        </p>
+
+        <div style="text-align: center; margin-top: 15px;">
+            Map: <input type="number" id="map-w" value="16"> x <input type="number" id="map-h" value="10"> 
+            Marines: <input type="number" id="sm-count" value="3"> 
+            Orks: <input type="number" id="ork-count" value="8">
+            <button onclick="initGame()" style="margin-left:10px;">Deploy Forces</button>
+        </div>
+    </div>
+</div>
+
+<div id="ui-layer" style="display:none">
+    <div id="turn-indicator" style="font-weight: bold; font-size: 1.2rem;">DEPLOYING...</div>
+    <div>
+        <button id="exit-btn" onclick="exitGame()">Retreat</button>
+        <button id="ability-btn" onclick="useHeroAbility()">SPECIAL ABILITY</button>
+        <button id="end-btn" onclick="manualEndTurn()">Confirm Deployment</button>
+    </div>
+</div>
+
+<div id="main-container">
+    <div id="game-viewport"><div id="game-board" style="display:none"></div></div>
+    <div id="side-panel">
+        <div style="padding: 10px; font-weight: bold; background: #333; text-align: center;">COMBAT LOG</div>
+        <div id="log"></div>
+        <div id="inspector">
+            <div style="color:#aaa; text-align:center; margin-top:50px;">Select a unit to inspect</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let config = { w: 16, h: 10, ts: 50 };
+    let units = [], selectedUnit = null, turn = 'sm', gameState = 'deploy-sm', board = [];
+
+    function triggerOverlay(text, color) {
+        const el = document.getElementById('phase-overlay');
+        el.innerText = text; el.style.color = color || 'white';
+        el.style.display = 'flex'; el.style.animation = 'none'; el.offsetHeight; el.style.animation = null;
+        setTimeout(() => { el.style.display = 'none'; }, 1200);
+    }
+
+    function exitGame() {
+        if(confirm("Are you sure you want to abandon the match?")) location.reload();
+    }
+
+    function initGame() {
+        config.w = parseInt(document.getElementById('map-w').value);
+        config.h = parseInt(document.getElementById('map-h').value);
+        document.getElementById('setup-screen').style.display = 'none';
+        document.getElementById('ui-layer').style.display = 'flex';
+        const boardEl = document.getElementById('game-board');
+        boardEl.innerHTML = '';
+        boardEl.style.display = 'grid';
+        boardEl.style.gridTemplateColumns = `repeat(${config.w}, ${config.ts}px)`;
+        board = [];
+        units = [];
+
+        for (let y = 0; y < config.h; y++) {
+            for (let x = 0; x < config.w; x++) {
+                let type = Math.random() < 0.12 ? 'water' : Math.random() < 0.15 ? 'forest' : Math.random() < 0.15 ? 'elevation' : 'grass';
+                const cell = document.createElement('div');
+                cell.id = `c-${x}-${y}`; cell.className = `cell ${type}`;
+                cell.onclick = () => handleCellClick(x, y);
+                boardEl.appendChild(cell);
+                board.push({x, y, type});
+            }
+        }
+        spawnUnits();
+        triggerOverlay("MARINES DEPLOY", "var(--sm)");
+    }
+
+    function spawnUnits() {
+        units.push({ id: 'hero-sm', type:'sm', isHero:true, x:1, y:Math.floor(config.h/2), hp:5, maxHp:5, ap:2, move:2, quality:3, ability: "Repair (Heal Adjacent)" });
+        units.push({ id: 'hero-ork', type:'ork', isHero:true, x:config.w-2, y:Math.floor(config.h/2), hp:4, maxHp:4, ap:2, move:2, quality:4, ability: "Waaagh! (AOE Smash)" });
+        
+        const smC = parseInt(document.getElementById('sm-count').value);
+        const orkC = parseInt(document.getElementById('ork-count').value);
+        for(let i=0; i<smC; i++) units.push({ id: 'u-sm-'+i, type:'sm', x:0, y:i%config.h, hp:3, maxHp:3, ap:2, move:2, quality:3, ability:"None" });
+        for(let i=0; i<orkC; i++) units.push({ id: 'u-ok-'+i, type:'ork', x:config.w-1, y:(config.h-1)-(i%config.h), hp:2, maxHp:2, ap:2, move:2, quality:4, ability:"None" });
+        
+        units.forEach(u => {
+            let tile = board.find(c => c.x === u.x && c.y === u.y);
+            if(tile && tile.type === 'water') tile.type = 'grass';
+        });
+        render();
+    }
+
+    function useHeroAbility() {
+        if (!selectedUnit || !selectedUnit.isHero || selectedUnit.ap < 2) return;
+        if (selectedUnit.type === 'sm') {
+            const targets = units.filter(u => u.type === 'sm' && getDist(u.x, u.y, selectedUnit.x, selectedUnit.y) <= 1);
+            targets.forEach(t => { if(t.hp < t.maxHp) t.hp++; });
+            log("Captain REPAIRS nearby Marines!");
+        } else {
+            const targets = units.filter(u => u.type === 'sm' && getDist(u.x, u.y, selectedUnit.x, selectedUnit.y) <= 1);
+            targets.forEach(t => { t.hp--; if (t.hp <= 0) killUnit(t); });
+            log("WARBOSS WAAAGH! AOE DAMAGE!");
+        }
+        selectedUnit.ap = 0;
+        render();
+        checkWin();
+    }
+
+    function killUnit(u) {
+        const cell = document.getElementById(`c-${u.x}-${u.y}`);
+        if(cell) cell.classList.add('blood-stain');
+        const el = document.getElementById(u.id);
+        if (el) el.remove();
+        units = units.filter(un => un !== u);
+        if (selectedUnit === u) selectedUnit = null;
+    }
+
+    function handleCellClick(x, y) {
+        const tile = board.find(c => c.x === x && c.y === y);
+        if (tile.type === 'water') return;
+
+        if (gameState.includes('deploy') && selectedUnit) {
+            const inZone = (gameState==='deploy-sm' && x < 3) || (gameState==='deploy-ork' && x >= config.w-3);
+            if (inZone && !units.some(u => u.x === x && u.y === y && u !== selectedUnit)) {
+                selectedUnit.x = x; selectedUnit.y = y; render();
+            }
+        } else if (gameState === 'play' && selectedUnit && selectedUnit.ap > 0) {
+            if (getDist(selectedUnit.x, selectedUnit.y, x, y) <= selectedUnit.move) {
+                if (units.some(u => u.x === x && u.y === y)) return;
+                selectedUnit.x = x; selectedUnit.y = y; selectedUnit.ap--; render();
+            }
+        }
+    }
+
+    function selectUnit(u) {
+        if (gameState === 'play' && u.type !== turn) {
+            if (selectedUnit && selectedUnit.ap > 0) resolveCombat(selectedUnit, u);
+            return;
+        }
+        selectedUnit = (selectedUnit === u) ? null : u;
+        render();
+    }
+
+    function resolveCombat(atk, def) {
+        const dist = getDist(atk.x, atk.y, def.x, def.y);
+        if (dist > (atk.type === 'sm' ? 3 : 2)) return;
+        
+        const defTile = board.find(c => c.x === def.x && c.y === def.y).type;
+        const atkTile = board.find(c => c.x === atk.x && c.y === atk.y).type;
+        
+        let roll = Math.floor(Math.random() * 6) + 1;
+        let target = atk.quality + (dist > 1 ? 1 : 0);
+        
+        // TERRAIN LOGIC
+        if (defTile === 'forest') target++; // Target is in cover
+
+        // Elevation rules: if both on elevation, they cancel out
+        if (atkTile === 'elevation' && defTile !== 'elevation') {
+            roll++; // Attacker has high ground bonus
+        }
+        
+        if (defTile === 'elevation' && atkTile !== 'elevation') {
+            target--; // Defender on high ground is easier to spot (vulnerability)
+        }
+
+        if (atk.type === 'ork') {
+            const buddies = units.filter(u => u.type === 'ork' && u !== atk && getDist(u.x, u.y, def.x, def.y) <= 1).length;
+            if (buddies > 0) { roll += buddies; log(`Mob Rule! +${buddies} to hit.`); }
+        }
+        
+        atk.ap--;
+        if (roll >= target) {
+            def.hp--;
+            log(`${atk.type.toUpperCase()} hits! (Roll ${roll} vs ${target})`);
+            if (def.hp <= 0) killUnit(def);
+        } else { log(`${atk.type.toUpperCase()} missed. (Roll ${roll} vs ${target})`); }
+        render();
+        checkWin();
+    }
+
+    function updateInspector() {
+        const panel = document.getElementById('inspector');
+        if (!selectedUnit) {
+            panel.innerHTML = `<div style="color:#aaa; text-align:center; margin-top:50px;">Select a unit to inspect</div>`;
+            return;
+        }
+
+        const u = selectedUnit;
+        const tile = board.find(c => c.x === u.x && c.y === u.y);
+        let bonuses = [];
+        if (tile.type === 'elevation') bonuses.push("<span class='bonus-tag'>▲ HIGH GROUND: +1 Attack / -1 Defense</span>");
+        if (tile.type === 'forest') bonuses.push("<span class='bonus-tag'>🌲 FOREST: +1 Defensive Difficulty</span>");
+        if (u.type === 'ork') bonuses.push("<span class='bonus-tag'>👥 MOB RULE: +1 hit per nearby ally</span>");
+
+        panel.innerHTML = `
+            <h3 style="margin:0 0 10px 0; color:${u.type === 'sm' ? 'var(--sm)' : 'var(--ork)'}">
+                ${u.isHero ? '★ HERO' : u.type.toUpperCase()} 
+                <span style="font-size:0.7rem; color:#888; float:right">POS: ${u.x},${u.y}</span>
+            </h3>
+            <div class="stat-line"><span>Health:</span> <span>${u.hp} / ${u.maxHp}</span></div>
+            <div class="stat-line"><span>Action Pts:</span> <span>${u.ap} / 2</span></div>
+            <div class="stat-line"><span>Quality:</span> <span>${u.quality}+</span></div>
+            <div class="stat-line"><span>Ability:</span> <span style="color:#9333ea">${u.ability}</span></div>
+            <div style="margin-top:10px;">${bonuses.join('')}</div>
+        `;
+    }
+
+    function render() {
+        document.querySelectorAll('.cell').forEach(c => c.classList.remove('can-move', 'deploy-zone'));
+        const btn = document.getElementById('ability-btn');
+        btn.style.display = (selectedUnit && selectedUnit.isHero && gameState === 'play') ? 'inline-block' : 'none';
+        btn.disabled = (selectedUnit && selectedUnit.ap < 2);
+
+        if (gameState.includes('deploy')) {
+            board.forEach(c => {
+                const isZone = (gameState==='deploy-sm' && c.x<3) || (gameState==='deploy-ork' && c.x>=config.w-3);
+                if (isZone && c.type !== 'water') document.getElementById(`c-${c.x}-${c.y}`).classList.add('deploy-zone');
+            });
+        }
+
+        units.forEach(u => {
+            let el = document.getElementById(u.id);
+            if (!el) {
+                el = document.createElement('div'); el.id = u.id;
+                el.innerHTML = `<div class="hp-label"></div><div class="terrain-badge"></div><div class="unit-body"></div><div class="ap-pips"></div>`;
+                el.onclick = (e) => { e.stopPropagation(); selectUnit(u); };
+                document.getElementById('game-board').appendChild(el);
+            }
+            el.style.left = (u.x * config.ts) + 'px'; el.style.top = (u.y * config.ts) + 'px';
+            el.className = `unit ${u.type} ${u.isHero?'hero':''} ${selectedUnit === u ? 'selected' : ''}`;
+            el.querySelector('.unit-body').innerText = u.isHero ? '★' : (u.type === 'sm' ? 'SM' : 'O');
+            el.querySelector('.hp-label').innerText = `${u.hp}HP`;
+            
+            const currentTile = board.find(c => c.x === u.x && c.y === u.y);
+            const badge = el.querySelector('.terrain-badge');
+            if (currentTile.type === 'forest') { badge.innerText = '🌲'; badge.style.display = 'flex'; }
+            else if (currentTile.type === 'elevation') { badge.innerText = '▲'; badge.style.display = 'flex'; }
+            else { badge.style.display = 'none'; }
+
+            const pips = el.querySelector('.ap-pips'); pips.innerHTML = '';
+            for(let i=0; i<u.ap; i++) pips.innerHTML += `<div class="pip"></div>`;
+            
+            if (selectedUnit === u && u.ap > 0 && gameState === 'play') {
+                board.forEach(c => { 
+                    if (getDist(u.x,u.y,c.x,c.y) <= u.move && c.type !== 'water' && !units.some(ou => ou.x === c.x && ou.y === c.y)) 
+                        document.getElementById(`c-${c.x}-${c.y}`).classList.add('can-move'); 
+                });
+            }
+        });
+        updateInspector();
+    }
+
+    function manualEndTurn() {
+        const ind = document.getElementById('turn-indicator');
+        if (gameState === 'deploy-sm') { 
+            gameState = 'deploy-ork'; ind.innerText = "ORK DEPLOYMENT"; triggerOverlay("ORKS DEPLOY", "var(--ork)");
+            document.getElementById('end-btn').innerText = "Begin Battle";
+        }
+        else if (gameState === 'deploy-ork') { 
+            gameState = 'play'; ind.innerText = "MARINE TURN"; triggerOverlay("BATTLE START", "#fff");
+            document.getElementById('end-btn').innerText = "End Turn";
+        }
+        else {
+            turn = turn === 'sm' ? 'ork' : 'sm';
+            units.forEach(u => u.ap = 2);
+            selectedUnit = null;
+            ind.innerText = `${turn === 'sm' ? 'MARINE' : 'ORK'} TURN`;
+            triggerOverlay(`${turn.toUpperCase()} TURN`, turn === 'sm' ? "var(--sm)" : "var(--ork)");
+        }
+        render();
+    }
+
+    function log(m) { const l = document.getElementById('log'); l.innerHTML = `<div class="log-entry">> ${m}</div>` + l.innerHTML; }
+    function getDist(x1, y1, x2, y2) { return Math.max(Math.abs(x1-x2), Math.abs(y1-y2)); }
+    function checkWin() {
+        if (!units.some(u => u.type === 'sm')) { triggerOverlay("ORKS WIN!", "var(--ork)"); setTimeout(()=>location.reload(), 3000); }
+        if (!units.some(u => u.type === 'ork')) { triggerOverlay("MARINES WIN!", "var(--sm)"); setTimeout(()=>location.reload(), 3000); }
+    }
+</script>
+</body>
+</html>
